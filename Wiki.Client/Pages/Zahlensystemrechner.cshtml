@@ -1,0 +1,71 @@
+﻿@using System.Text.RegularExpressions;
+@using System.Diagnostics;
+@page "/zahlensystemrechner"
+
+<h1>Zahlensystemrechner</h1>
+
+<label>Use Prefix</label>
+<input type="checkbox" bind="@Wiki.Shared.Zahlensystemrechner.Prefix" />
+<br />
+
+<input bind="@input"/>
+<button class="btn btn-primary" onclick="@Main">Calculate</button>
+<br /><br />
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Rechnung</th>
+            <th>Dezimal</th>
+            <th>Binär</th>
+            <th>Oktal</th>
+            <th>Hexadezimal</th>
+            <th>Zeit</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach(var calc in calcs)
+        {
+        <tr>
+            <td>@calc.Item1</td>
+            <td>@calc.Item2</td>
+            <td>@calc.Item3</td>
+            <td>@calc.Item4</td>
+            <td>@calc.Item5</td>
+            <td>@calc.Item6</td>
+        </tr>
+        }
+    </tbody>
+</table>
+
+@functions {
+    private readonly Regex Braces = new Regex("\\(([^()]+)\\)");
+    private readonly Regex Points = new Regex("(\\+|-)?[a-fhyko0-9]+(\\*|\\|\\/|:){1}(\\+|-)?[a-fhyko0-9]+");
+    private readonly Regex Line = new Regex("(\\+|-)?[a-fhxko0-9]+(\\+|-){1}(\\+|-)?[a-fhxko0-9]+");
+
+    string input = "";
+    List<Tuple<string, string, string, string, string, string>> calcs = new List<Tuple<string, string, string, string, string, string>>();
+
+    void Main()
+    {
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            var result = Wiki.Shared.Zahlensystemrechner.Calculate(input);
+            sw.Stop();
+            var time = (sw.ElapsedTicks / (TimeSpan.TicksPerMillisecond / 1000f) / 1000f / 1000f)
+                .ToString("F99").TrimEnd('0');
+
+            calcs.Insert(0, Tuple.Create((string)input.Clone(),
+                result,
+                Wiki.Shared.Zahlensystemrechner.ConvertToZahlensystem(Int32.Parse(result), Wiki.Shared.Zahlensysteme.Dual),
+                Wiki.Shared.Zahlensystemrechner.ConvertToZahlensystem(Int32.Parse(result), Wiki.Shared.Zahlensysteme.Oktal),
+                Wiki.Shared.Zahlensystemrechner.ConvertToZahlensystem(Int32.Parse(result), Wiki.Shared.Zahlensysteme.Hexadezimal),
+                time + " Seconds"));
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e.Message);
+        }
+    }
+}

@@ -1,0 +1,239 @@
+﻿@using Wiki.Shared
+@using Microsoft.AspNetCore.Blazor.Browser.Interop
+@page "/wiki"
+@inject HttpClient Http
+
+<h1>Wiki</h1>
+
+@if (!modifying && !creating)
+{
+    <button class="btn btn-primary" onclick="@AddEntryView">Füge Eintrag Hinzu</button>
+    <br /><br />
+}
+
+@if (!hidden && entry != null)
+{
+    @if (modifying || creating)
+    {
+        <input class="full-width" bind="@entry.Title" />
+        <br /><br />
+        <ul>
+            @foreach (var step in viewingSteps)
+            {
+                <li class="step-item"><input class="full-width" id="step-@step.position" bind="@step.value" /></li>
+            }
+            <li><button class="btn" onclick="@AddStep">Füge Schritt Hinzu</button></li>
+        </ul>
+        <label>Links</label>
+        <input class="full-width" title="Comma separated list of links" bind="@entry.References" />
+        <br /><br />
+        <label>Tags</label>
+        <input class="full-width" title="Comma separated list of tags" bind="@entry.Tags" />
+        <br /><br />
+        <button class="btn btn-primary" onclick="@SaveEntry">Ok</button>
+        <button class="btn btn-danger" onclick="@CancelModify">Abbrechen</button>
+    }
+    else
+    {
+        <h2>@entry.Title</h2>
+        <ul>
+            @foreach (var step in viewingSteps)
+            {
+                @if (modifying || creating)
+                {
+                    <li class="step-item"><input class="full-width" id="step-@step.position" bind="@step.value" /></li>
+                }
+                else
+                {
+                    <li>@((step.position + 1) + ".") @step.value</li>
+                }
+            }
+        </ul>
+        <label>Links: @entry.References</label>
+        <br />
+        <label>Tags: @entry.Tags</label>
+        <br /><br />
+        <button class="btn btn-primary" onclick="@(e => ModifyEntryView(entry.ID))">Modifizieren</button>
+    }
+    <br /><br />
+}
+
+@if (entries == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <input class="full-width" placeholder="Suche" autofocus autocomplete="on" oninput="(this.dispatchEvent(new CustomEvent('change', { bubbles: true })))" onchange="@(Search)" />
+    <br /><br />
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Titel</th>
+                <th>Tags</th>
+                <th>Aktionen</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (WikiEntry item in entries)
+            {
+                <tr>
+                    <td><button class="btn btn-success" onclick="@(e => ViewEntry(item.ID))">@item.Title</button></td>
+                    <td>@item.Tags</td>
+                    <td><button class="btn btn-primary" onclick="@(e => ModifyEntryView(item.ID))">Modifizieren</button><button class="btn btn-danger" onclick="@(e => DeleteEntry(item.ID))">Löschen</button></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@functions {
+List<WikiEntry> entries = null;
+WikiEntry entry = null;
+List<Step> viewingSteps = new List<Step>();
+bool hidden = true;
+bool modifying = false;
+bool creating = false;
+string lastSearchTerm = "";
+Task<WikiEntry[]> currentSearch = null;
+
+protected override async Task OnInitAsync()
+{
+    entries = (await Http.GetJsonAsync<WikiEntry[]>("api/WikiEntries/GetWikiEntriesLimited/10")).ToList<WikiEntry>();
+}
+
+void Search(UIChangeEventArgs e)
+{
+    var value = (string)e.Value;
+    if (value != lastSearchTerm)
+    {
+        if (currentSearch != null)
+        {
+            currentSearch.Dispose();
+        }
+
+        if (value != "")
+        {
+            lastSearchTerm = value;
+            currentSearch = Http.GetJsonAsync<WikiEntry[]>("/api/WikiEntries/Search/" + value);
+            currentSearch.ContinueWith(t =>
+            {
+                entries = t.Result.ToList();
+                this.StateHasChanged();
+            });
+        }
+        else
+        {
+            currentSearch = Http.GetJsonAsync<WikiEntry[]>("/api/WikiEntries/GetWikiEntriesLimited/10");
+            currentSearch.ContinueWith(t =>
+            {
+                entries = t.Result.ToList();
+                this.StateHasChanged();
+            });
+        }
+    }
+}
+
+void AddStep()
+{
+    viewingSteps.Add(new Step(viewingSteps.Count, ""));
+}
+
+void AddEntryView()
+{
+    entry = new WikiEntry();
+    entry.Title = "Titel";
+    viewingSteps.Clear();
+    hidden = false;
+    creating = true;
+    modifying = false;
+}
+
+void ViewEntry(int ID)
+{
+    viewingSteps.Clear();
+    hidden = false;
+    entry = entries.FirstOrDefault(item => item.ID == ID);
+
+    var steps = entry.Steps.Split(';');
+    for (var i = 0; i < steps.Length; i++)
+    {
+        viewingSteps.Add(new Step(i, steps[i]));
+    }
+
+    creating = false;
+    modifying = false;
+}
+
+void CancelModify()
+{
+    creating = false;
+    modifying = false;
+    hidden = true;
+    entry = null;
+}
+
+async Task SaveEntry()
+{
+    if (creating)
+    {
+        entry.Steps = string.Join(";", viewingSteps.Select(item => item.value).Where(item => !string.IsNullOrWhiteSpace(item)));
+        await Http.PostJsonAsync("api/WikiEntries", entry);
+
+        entry = await Http.GetJsonAsync<WikiEntry>("api/WikiEntries/GetLastEntry");
+
+        entries.Insert(0, entry);
+        hidden = true;
+        creating = false;
+        entry = new WikiEntry();
+    }
+    else if (modifying)
+    {
+        entry.Steps = string.Join(";", viewingSteps.Select(item => item.value).Where(item => !string.IsNullOrWhiteSpace(item)));
+        await Http.PutJsonAsync("/api/WikiEntries/" + entry.ID, entry);
+
+        var index = entries.FindIndex(item => item.ID == entry.ID);
+
+        entries.RemoveAt(index);
+        entries.Insert(index, entry);
+        hidden = true;
+        modifying = false;
+        entry = new WikiEntry();
+    }
+}
+
+async Task DeleteEntry(int ID)
+{
+    HttpResponseMessage response = await Http.DeleteAsync("api/WikiEntries/" + ID);
+
+    response.EnsureSuccessStatusCode();
+
+    var first = entries.FirstOrDefault(item => item.ID == ID);
+
+    if (first != null)
+    {
+        entries.Remove(first);
+    }
+}
+
+void ModifyEntryView(int ID)
+{
+    entry = entries.FirstOrDefault(item => item.ID == ID);
+
+    modifying = true;
+    hidden = false;
+    creating = false;
+}
+
+public class Step
+{
+    public int position { get; set; }
+    public string value { get; set; }
+
+    public Step(int pos, string val)
+    {
+        position = pos;
+        value = val;
+    }
+}
+}
